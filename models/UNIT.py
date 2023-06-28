@@ -1,10 +1,11 @@
 import tensorflow
 
 from keras.layers import ZeroPadding2D, BatchNormalization, Input, MaxPooling2D, AveragePooling2D, Conv2D, LeakyReLU, Flatten, Conv2DTranspose, Activation, add, Lambda, GaussianNoise, concatenate, Dropout
-from keras_contrib.layers.normalization.instancenormalization import InstanceNormalization
+#from keras_contrib.layers.normalization.instancenormalization import InstanceNormalization
 from keras.layers.core import Dense, Flatten, Reshape
 from keras.models import Model, load_model
-from tensorflow.keras.optimizers.legacy import Adam
+#from tensorflow.keras.optimizers.legacy import Adam
+from tensorflow.keras.optimizers import Adam
 from tensorflow.train import Checkpoint, CheckpointManager, latest_checkpoint
 from keras.activations import tanh
 from keras.regularizers import l2
@@ -26,7 +27,7 @@ sys.path.append('..')
 data_path = sys.argv[1]
 outputdir = sys.argv[2]
 
-import load_data
+import load_data_unit
 import os
 import csv
 
@@ -47,7 +48,7 @@ class UNIT():
 
         if self.use_data_generator:
             print('--- Using dataloader during training ---')
-            self.data_generator = load_data.load_data(
+            self.data_generator = load_data_unit.load_data(
                 self.channels, generator=True, subfolder=image_folder)
             nr_A_train_imgs=None
             nr_B_train_imgs=None
@@ -63,7 +64,7 @@ class UNIT():
 
         else:
             print('--- Caching data ---')
-            data = load_data.load_data(self.channels,
+            data = load_data_unit.load_data(self.channels,
                                nr_A_train_imgs=nr_A_train_imgs,
                                nr_B_train_imgs=nr_B_train_imgs,
                                nr_A_test_imgs=nr_A_test_imgs,
@@ -221,8 +222,11 @@ class UNIT():
 
 #===============================================================================
 # Decide what to Run
-        self.trainFullModel(outputdir,resume=True)
-        #self.load_model_and_generate_synthetic_images("name_of_saved_model", epoch) # eg. "20180504-140511_test1", 180
+        self.trainFullModel(outputdir,resume=False)
+        #self.load_model_and_generate_synthetic_images(outputdir,"20230507-092145", 99) # eg. "20180504-140511_test1", 180
+        #20230507-092145 for FA
+        #20230506-183129 for MD
+        
         #self.loadAllWeightsToModelsIncludeDisc("name_of_saved_model", epoch)
 
 #===============================================================================
@@ -556,7 +560,8 @@ class UNIT():
 
             if epoch % 1 == 0:
                 self.saveCheckpoints(outputdir, epoch)
-                #self.saveCurrentModels(outputdir,epoch)
+            if epoch % 3 == 0:
+                self.saveCurrentModels(outputdir,epoch)
 
             if epoch % save_interval == 0:
                 print('--------Saving images for epoch', epoch, '--------')
@@ -587,6 +592,7 @@ class UNIT():
                 self.writeLossDataToFile(outputdir)
 
             if epoch==(epochs-1):
+            #if (epoch % 5) == 0:
                 self.saveModel(outputdir,self.discriminatorA, 'discriminatorA', epoch)
                 self.saveModel(outputdir,self.discriminatorB, 'discriminatorB', epoch)
                 self.saveModel(outputdir,self.generatorA, 'generatorA', epoch)
@@ -639,7 +645,7 @@ class UNIT():
                           optimizer=self.opt)
       ckpt.restore(latest_checkpoint(directory)).expect_partial()
       print('Checkpoint restored from {}'.format(latest_checkpoint(directory)))
-      ckptfilename = latest_checkpoint(directory).split('/')[12]
+      ckptfilename = latest_checkpoint(directory).split('/')[-1]
       print(ckptfilename)
       return int(ckptfilename.split('-')[2])
 
@@ -654,7 +660,7 @@ class UNIT():
                           gen_B = self.generatorB,
                           disc_A = self.discriminatorA,
                           disc_B = self.discriminatorB)
-        chkpt_manager = CheckpointManager(ckpt,directory,max_to_keep=5, checkpoint_name="ckpt-epoch-{}".format(str(epoch)))
+        chkpt_manager = CheckpointManager(ckpt,directory,max_to_keep=10, checkpoint_name="ckpt-epoch-{}".format(str(epoch)))
 
         
         print('Saving checkpoints for epoch {}'.format(str(epoch)))
@@ -715,7 +721,7 @@ class UNIT():
         self.generatorA.load_weights(pathGeneratorA)
         self.generatorB.load_weights(pathGeneratorB)
 
-    def load_model_and_generate_synthetic_images(self, outputdir, folder_name, epoch):
+    def load_model_and_generate_synthetic_images(self, data_path, outputdir, folder_name, epoch):
         self.loadAllWeightsToModels(outputdir,folder_name, epoch)
         synthetic_images_B = self.predict_A_B(self.A_test)
         synthetic_images_A = self.predict_B_A(self.B_test)
@@ -729,24 +735,27 @@ class UNIT():
             if not os.path.exists(directory):
                 os.makedirs(directory)
             directory = os.path.join(directory, name)
-            try:
-                array_to_img(image, cmin=0, cmax=1).save(directory)
-            except Exception as e:
-                print("type error: " + str(e))
+            np.save(directory,image)
+            # try:
+            #     array_to_img(image, cmin=0, cmax=1).save(directory)
+            # except Exception as e:
+            #     print("type error: " + str(e))
 
         # Test A images
         for i in range(len(synthetic_images_A)):
+            testB_image_names = os.listdir(data_path+'testB/')
             # Get the name from the image it was conditioned on
-            name = self.testB_image_names[i].strip('.png') + '_synthetic.png'
+            name = testB_image_names[i].strip('.npy') + '_synthetic'
             synt_A = synthetic_images_A[i]
-            save_image(synt_A, name, 'A')
+            save_image(outputdir,synt_A, name, 'A')
 
         # Test B images
         for i in range(len(synthetic_images_B)):
             # Get the name from the image it was conditioned on
-            name = self.testA_image_names[i].strip('.png') + '_synthetic.png'
+            testA_image_names = os.listdir(data_path+'testA/')
+            name = testA_image_names[i].strip('.npy') + '_synthetic'
             synt_B = synthetic_images_B[i]
-            save_image(synt_B, name, 'B')
+            save_image(outputdir,synt_B, name, 'B')
 
         print('{} synthetic images have been generated and placed in ./generate_images/synthetic_images'
               .format(len(self.A_test) + len(self.B_test)))
